@@ -65,7 +65,7 @@
     position:absolute; inset:0; left:230px;
     background-image: radial-gradient(var(--line) 1px, transparent 1px);
     background-size: 22px 22px;
-    overflow:auto; touch-action:none;
+    overflow:auto; touch-action:pan-x pan-y;
     transition:left .2s ease;
   }
   #board.full{ left:0; }
@@ -89,7 +89,7 @@
     padding:14px 14px 30px; border-radius:3px;
     box-shadow:0 10px 18px -10px rgba(0,0,0,.35), 0 2px 4px rgba(0,0,0,.12);
     font-size:13.5px; line-height:1.4; color:#2c2620;
-    cursor:grab;
+    cursor:grab; touch-action:none;
   }
   .note.dragging{ cursor:grabbing; z-index:999; box-shadow:0 20px 30px -12px rgba(0,0,0,.45); }
   .note .top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:2px; }
@@ -633,6 +633,11 @@
       st.top = '76px';
       st.transform = 'translateX(-50%)';
     }
+    // Pantallas bajas (celular en horizontal): que la tarjeta nunca se salga por abajo
+    if(!isNarrow()){
+      var h = coach.offsetHeight, top = parseFloat(st.top) || 0;
+      if(top + h > window.innerHeight - 8){ st.top = Math.max(8, window.innerHeight - h - 8) + 'px'; }
+    }
   }
 
   function renderCoach(){
@@ -772,14 +777,31 @@
     save();
   });
 
+  var lastTouchCreate = 0, lastTap = null;
+  function createAt(cx, cy){
+    var br = board.getBoundingClientRect();
+    var x = cx - br.left + board.scrollLeft - 90;
+    var y = cy - br.top + board.scrollTop - 60;
+    x = Math.max(0, x);
+    y = Math.max(10, Math.min(y, roadY(x + 90) - 190));
+    addNote(x, y);
+  }
   board.addEventListener('dblclick', function(ev){
     if(ev.target.closest('.note') || ev.target.closest('.startMarker')) return;
-    var br = board.getBoundingClientRect();
-    var x = ev.clientX - br.left + board.scrollLeft - 90;
-    var y = ev.clientY - br.top + board.scrollTop - 60;
-    x = Math.max(0, x);
-    y = Math.max(10, Math.min(y, roadY(x + 90) - 150));
-    addNote(x, y);
+    if(Date.now() - lastTouchCreate < 800) return;
+    createAt(ev.clientX, ev.clientY);
+  });
+  /* Táctil: doble toque para crear un hito (el desplazamiento con el dedo no dispara pointerup) */
+  board.addEventListener('pointerup', function(ev){
+    if(ev.pointerType !== 'touch') return;
+    if(ev.target.closest('.note') || ev.target.closest('.startMarker')) return;
+    var now = Date.now();
+    if(lastTap && now - lastTap.t < 380 && Math.abs(ev.clientX - lastTap.x) < 30 && Math.abs(ev.clientY - lastTap.y) < 30){
+      lastTap = null; lastTouchCreate = now;
+      createAt(ev.clientX, ev.clientY);
+    }else{
+      lastTap = { t:now, x:ev.clientX, y:ev.clientY };
+    }
   });
 
   document.addEventListener('keydown', function(ev){
