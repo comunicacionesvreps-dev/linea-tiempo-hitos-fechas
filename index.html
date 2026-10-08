@@ -43,13 +43,33 @@
   }
   button.pill:hover{ background:var(--line); }
 
+  /* Encabezado: en escritorio los botones van en línea; en pantallas táctiles se agrupan en un menú ⋯ */
+  #menuItems{ display:contents; }
+  #menuBtn{ display:none; }
+  #helpBtn,#toggleSidebar,#goToday{ order:1; }
+  #toggleText{ order:2; } #addBtn{ order:3; } #clearBtn{ order:4; }
+  .fold{ display:none; }
+  .tbtns{ display:flex; align-items:center; gap:2px; }
+  .touch #menuBtn{ display:inline-block; order:1; font-size:18px; line-height:1; padding:6px 14px; min-height:36px; }
+  .touch #toggleText,.touch #addBtn{ min-height:36px; }
+  .touch #menuItems{
+    display:none; position:fixed; top:calc(54px + env(safe-area-inset-top, 0px)); right:10px; z-index:70;
+    flex-direction:column; gap:6px; padding:8px; background:var(--paper); border:1px solid var(--line);
+    border-radius:14px; box-shadow:0 18px 40px -14px rgba(0,0,0,.45);
+  }
+  .touch #topbar.menu-open #menuItems{ display:flex; }
+  .touch #menuItems .pill{ min-height:40px; text-align:left; order:0; }
+  .touch .note .ncolor{ width:22px; height:22px; }
+  .touch .note button.del,.touch .note button.fold{ min-width:36px; min-height:36px; font-size:18px; }
+  .touch .texts-hidden .note.open button.fold{ display:inline-block; border:none; background:transparent; color:rgba(44,38,32,.65); cursor:pointer; padding:2px 4px; }
+  @media (max-width:520px){ .touch h1{ display:none; } }
   #sidebar{
     position:fixed; top:0; left:0; bottom:0; width:230px; z-index:55;
     background:var(--paper); border-right:1px solid var(--line);
     padding:64px 14px 14px; overflow:auto;
     transition:transform .2s ease;
   }
-  #sidebar.hidden{ transform:translateX(-100%); }
+  #sidebar.hidden{ transform:translateX(-100%); box-shadow:none !important; }
   #sidebar h2{ font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); margin:0 0 10px; font-weight:600; }
   .trigger{ border-bottom:1px solid var(--line); }
   .trigger summary{ list-style:none; cursor:pointer; padding:10px 2px; font-size:13.5px; display:flex; gap:8px; align-items:flex-start; }
@@ -211,15 +231,18 @@
   }
 </style>
 
-<header>
+<header id="topbar">
   <h1>Mi línea de tiempo</h1>
   <div class="spacer"></div>
-  <button class="pill" id="helpBtn" type="button">Instrucciones</button>
-  <button class="pill" id="toggleSidebar" type="button">Activadores</button>
-  <button class="pill" id="goToday" type="button">Ir a hoy</button>
+  <button class="pill" id="menuBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Más opciones">⋯</button>
+  <div id="menuItems">
+    <button class="pill" id="helpBtn" type="button">Instrucciones</button>
+    <button class="pill" id="toggleSidebar" type="button">Activadores</button>
+    <button class="pill" id="goToday" type="button">Ir a hoy</button>
+    <button class="pill" id="clearBtn" type="button">Vaciar</button>
+  </div>
   <button class="pill" id="toggleText" type="button">Ocultar textos</button>
   <button class="pill" id="addBtn" type="button">+ Hito</button>
-  <button class="pill" id="clearBtn" type="button">Vaciar</button>
 </header>
 
 <div id="sidebar">
@@ -373,17 +396,22 @@
     dot.style.top = ry + 'px';
   }
 
-  var lastNoteTap = null;
-  function toggleOpen(n, force){
+  var IS_TOUCH = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  if(IS_TOUCH) document.documentElement.classList.add('touch');
+  function closeAllOpen(exceptId){
+    notes.forEach(function(o){ if(o.open && o.id !== exceptId) toggleOpen(o, false); });
+  }
+  function toggleOpen(n, force, exclusive){
     if(!hideText) return;
     var el = document.getElementById('note-' + n.id);
     if(!el) return;
     n.open = (force != null) ? force : !n.open;
+    if(n.open && (exclusive || IS_TOUCH)) closeAllOpen(n.id);
     el.classList.toggle('open', n.open);
     clampY(n);
     updateMast(n);
     save();
-    if(n.open){ var ta = el.querySelector('textarea'); if(ta) ta.focus(); }
+    if(n.open && !IS_TOUCH){ var ta = el.querySelector('textarea'); if(ta) ta.focus(); }
   }
   function syncDate(n, el){
     el = el || document.getElementById('note-' + n.id);
@@ -447,7 +475,12 @@
       updateEmpty();
       save();
     });
-    top.appendChild(colorDot); top.appendChild(del);
+    var fold = document.createElement('button');
+    fold.type = 'button'; fold.className = 'fold'; fold.textContent = '–'; fold.title = 'Cerrar hito'; fold.setAttribute('aria-label', 'Cerrar hito');
+    fold.addEventListener('pointerdown', function(ev){ ev.stopPropagation(); });
+    fold.addEventListener('click', function(ev){ ev.stopPropagation(); toggleOpen(n, false); });
+    var tb = document.createElement('div'); tb.className = 'tbtns'; tb.appendChild(fold); tb.appendChild(del);
+    top.appendChild(colorDot); top.appendChild(tb);
     el.appendChild(top);
 
     var ta = document.createElement('textarea');
@@ -509,7 +542,7 @@
       raf = requestAnimationFrame(edgeLoop);
     }
     el.addEventListener('pointerdown', function(ev){
-      if(ev.target === ta || ev.target === del || ev.target === colorDot || ev.target.closest('.drow')) return;
+      if(ev.target === ta || ev.target === del || ev.target === colorDot || ev.target === fold || ev.target.closest('.drow')) return;
       dragging = true; moved = false;
       startX = lastX = ev.clientX; startY = lastY = ev.clientY;
       el.classList.add('dragging');
@@ -532,12 +565,10 @@
       el.classList.remove('dragging');
       try{ el.releasePointerCapture(ev.pointerId); }catch(e){}
       save();
-      /* Doble toque (táctil) sobre el hito: abrir o cerrar solo este hito */
-      if(ev.type === 'pointerup' && ev.pointerType === 'touch' && !moved){
-        var now = Date.now();
-        if(lastNoteTap && lastNoteTap.id === n.id && now - lastNoteTap.t < 380){
-          lastNoteTap = null; lastTouchToggle = now; toggleOpen(n);
-        }else{ lastNoteTap = { id:n.id, t:now }; }
+      /* Táctil: un solo toque sobre un banderín lo abre (y cierra los demás) */
+      if(ev.type === 'pointerup' && ev.pointerType === 'touch'){
+        lastTouchToggle = Date.now();
+        if(!moved && hideText && !n.open) toggleOpen(n, true, true);
       }
     }
     el.addEventListener('pointerup', endDrag);
@@ -546,7 +577,7 @@
     el.addEventListener('dblclick', function(ev){
       ev.stopPropagation();
       if(Date.now() - lastTouchToggle < 800) return;
-      if(ev.target === ta || ev.target === del || ev.target === colorDot || ev.target.closest('.drow')) return;
+      if(ev.target === ta || ev.target === del || ev.target === colorDot || ev.target === fold || ev.target.closest('.drow')) return;
       toggleOpen(n);
     });
 
@@ -573,6 +604,7 @@
     ax = dateToX(m) - 90;
     var ay = y != null ? y : (roadY(ax + 90) - 220 - Math.random()*40);
     var n = { id:id, x:ax, y:ay, date:m, hasMonth:false, open:!!hideText, color:COLORS[0], text:'' };
+    if(hideText && IS_TOUCH) closeAllOpen();
     notes.push(n);
     attachNote(n);
     clampY(n);
@@ -791,11 +823,21 @@
     guideOpen = false;
     coach.hidden = true;
     sidebar.classList.remove('pulse');
+    if(isNarrow()) showSidebar(false);
     updateEmpty();
   }
 
   /* ---------- Controles ---------- */
   document.getElementById('helpBtn').addEventListener('click', function(){ openGuide(0, 'full'); });
+  var topbar = document.getElementById('topbar'), menuBtn = document.getElementById('menuBtn');
+  function setMenu(open){ topbar.classList.toggle('menu-open', open); menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+  menuBtn.addEventListener('click', function(ev){ ev.stopPropagation(); setMenu(!topbar.classList.contains('menu-open')); });
+  document.addEventListener('pointerdown', function(ev){
+    if(topbar.classList.contains('menu-open') && !ev.target.closest('#menuItems') && ev.target !== menuBtn) setMenu(false);
+  });
+  ['helpBtn','toggleSidebar','goToday'].forEach(function(id){
+    document.getElementById(id).addEventListener('click', function(){ setMenu(false); });
+  });
   document.getElementById('goToday').addEventListener('click', function(){
     board.scrollTo({ left:Math.max(0, M.todayX - board.clientWidth / 2), behavior:'smooth' });
   });
@@ -818,6 +860,7 @@
       return;
     }
     disarmClear();
+    setMenu(false);
     notes = [];
     renderAll();
     save();
@@ -841,6 +884,7 @@
   board.addEventListener('pointerup', function(ev){
     if(ev.pointerType !== 'touch') return;
     if(ev.target.closest('.note') || ev.target.closest('.startMarker')) return;
+    if(hideText) closeAllOpen();
     var now = Date.now();
     if(lastTap && now - lastTap.t < 380 && Math.abs(ev.clientX - lastTap.x) < 30 && Math.abs(ev.clientY - lastTap.y) < 30){
       lastTap = null; lastTouchCreate = now;
