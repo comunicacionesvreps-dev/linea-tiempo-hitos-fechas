@@ -1,0 +1,814 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><title>Línea de tiempo fechada</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;600;700&display=swap">
+<style>
+  /* Plan: papel cálido + tinta oscura (mismo lenguaje de las pizarras), camino terroso, hitos en pasteles.
+     Layout: panel lateral de activadores + lienzo con camino ondulado ascendente + tarjeta guía flotante. */
+  :root{
+    --paper:#efe9dd; --ink:#2c2620; --ink-soft:#6b6155;
+    --line:rgba(44,38,32,.14);
+    --road:#8a7256; --road-dash:#efe9dd;
+    --veil:rgba(28,24,18,.55);
+    box-sizing:border-box;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#1c1a17; --ink:#ece6da; --ink-soft:#a89e8e; --line:rgba(236,230,218,.14);
+      --road:#6b5a42; --road-dash:#1c1a17; color-scheme:dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#1c1a17; --ink:#ece6da; --ink-soft:#a89e8e; --line:rgba(236,230,218,.14);
+    --road:#6b5a42; --road-dash:#1c1a17; color-scheme:dark;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{ background:var(--paper); color:var(--ink); font-family:'Mulish',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif; font-size:14px; overflow:hidden; }
+  button,input{ font-family:inherit; }
+  button:focus-visible,input:focus-visible,summary:focus-visible{ outline:2px solid var(--ink-soft); outline-offset:2px; }
+
+  header{
+    position:fixed; top:0; left:0; right:0; z-index:60;
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    padding:calc(12px + env(safe-area-inset-top, 0px)) 14px 12px;
+    background:linear-gradient(var(--paper) 78%, transparent);
+  }
+  h1{font-size:15px; font-weight:600; margin:0;}
+  .spacer{flex:1;}
+  button.pill{
+    font-size:13px; border:1px solid var(--line);
+    background:var(--paper); color:var(--ink); border-radius:999px;
+    padding:7px 14px; cursor:pointer;
+  }
+  button.pill:hover{ background:var(--line); }
+
+  #sidebar{
+    position:fixed; top:0; left:0; bottom:0; width:230px; z-index:55;
+    background:var(--paper); border-right:1px solid var(--line);
+    padding:64px 14px 14px; overflow:auto;
+    transition:transform .2s ease;
+  }
+  #sidebar.hidden{ transform:translateX(-100%); }
+  #sidebar h2{ font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); margin:0 0 10px; font-weight:600; }
+  .trigger{ border-bottom:1px solid var(--line); }
+  .trigger summary{ list-style:none; cursor:pointer; padding:10px 2px; font-size:13.5px; display:flex; gap:8px; align-items:flex-start; }
+  .trigger summary::-webkit-details-marker{ display:none; }
+  .trigger summary::before{ content:'+'; color:var(--ink-soft); flex:0 0 auto; }
+  .trigger[open] summary::before{ content:'–'; }
+  .trigger ul{ margin:0 0 12px; padding-left:34px; font-size:13px; color:var(--ink-soft); line-height:1.5; }
+  .trigger li + li{ margin-top:6px; }
+  @keyframes sidebarPulse{ 0%,100%{ box-shadow:inset 0 0 0 0 transparent; } 50%{ box-shadow:inset -5px 0 0 0 var(--ink-soft); } }
+  #sidebar.pulse{ animation:sidebarPulse 1.2s ease-in-out 3; }
+
+  #board{
+    position:absolute; inset:0; left:230px;
+    background-image: radial-gradient(var(--line) 1px, transparent 1px);
+    background-size: 22px 22px;
+    overflow:auto; touch-action:none;
+    transition:left .2s ease;
+  }
+  #board.full{ left:0; }
+  #canvas{ position:relative; width:2600px; height:780px; }
+
+  #roadSvg{ position:absolute; left:0; top:0; pointer-events:none; }
+  #roadBase{ stroke:var(--road); stroke-width:16; fill:none; stroke-linecap:round; stroke-linejoin:round;
+    filter:drop-shadow(0 3px 3px rgba(0,0,0,.18)); }
+  #roadTexture{ stroke:var(--road-dash); stroke-width:16; fill:none; stroke-linecap:round;
+    stroke-dasharray:3 24; opacity:.75; }
+
+  .mast{ position:absolute; width:2px; background:var(--ink-soft); opacity:.6; }
+  .flagdot{
+    position:absolute; width:10px; height:10px; border-radius:50%;
+    background:var(--ink); transform:translate(-50%,-50%);
+    box-shadow:0 0 0 3px var(--paper);
+  }
+
+  .note{
+    position:absolute; width:180px; min-height:130px;
+    padding:14px 14px 30px; border-radius:3px;
+    box-shadow:0 10px 18px -10px rgba(0,0,0,.35), 0 2px 4px rgba(0,0,0,.12);
+    font-size:13.5px; line-height:1.4; color:#2c2620;
+    cursor:grab;
+  }
+  .note.dragging{ cursor:grabbing; z-index:999; box-shadow:0 20px 30px -12px rgba(0,0,0,.45); }
+  .note .top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:2px; }
+  .note .ncolor{ width:15px; height:15px; border-radius:50%; cursor:pointer; border:2px solid rgba(255,255,255,.7); box-shadow:0 0 0 1px rgba(44,38,32,.25); }
+  .note button.del{ border:none; background:transparent; color:rgba(44,38,32,.55); font-size:15px; cursor:pointer; padding:2px 4px; }
+  .note button.del:hover{ color:rgba(44,38,32,.9); }
+  .note{ padding-bottom:14px; }
+  .drow{ display:flex; gap:4px; margin-top:8px; align-items:center; }
+  .drow select,.drow input{
+    font-size:12px; font-weight:600; color:#2c2620; background:rgba(255,255,255,.5);
+    border:1px solid rgba(44,38,32,.18); border-radius:999px; padding:3px 6px; outline:none; cursor:pointer;
+  }
+  .drow select{ width:64px; }
+  .drow input{ width:54px; text-align:center; cursor:text; }
+  .ychip{ display:none; }
+  .note textarea{
+    width:100%; height:80px; resize:none; border:none; background:transparent;
+    font-family:inherit; font-size:13.5px; line-height:1.4; color:inherit; outline:none; cursor:text;
+  }
+  /* Textos ocultos: cada hito se reduce a un banderín del mismo color, centrado sobre su asta */
+  .texts-hidden .note{
+    width:44px; min-height:30px; height:30px; padding:0; margin-left:68px; box-shadow:none; border-radius:0;
+    clip-path:polygon(0 0, 100% 0, 80% 50%, 100% 100%, 0 100%);
+  }
+  .texts-hidden .note > *{ display:none; }
+  .texts-hidden .note > .ychip{ display:flex; align-items:center; justify-content:center; height:100%; padding-right:7px; font-size:11px; font-weight:800; }
+
+  /* Fechas: mojones de año, bandera "Hoy", horizonte */
+  .decor{ position:absolute; pointer-events:none; }
+  .ypost{ width:2px; height:16px; background:var(--ink-soft); opacity:.7; }
+  .ylabel{ transform:translateX(-50%); font-size:11.5px; font-weight:700; color:var(--ink-soft); letter-spacing:.02em; }
+  .spost{ width:2px; background:var(--ink); }
+  .hoy{ width:2px; background:var(--ink); }
+  .hoy .tag{
+    position:absolute; left:2px; top:0; white-space:nowrap; background:var(--ink); color:var(--paper);
+    font-size:12px; font-weight:700; padding:4px 16px 4px 9px; clip-path:polygon(0 0, 100% 0, 88% 50%, 100% 100%, 0 100%);
+  }
+  .horizon{ font-style:italic; color:var(--ink-soft); font-size:13px; white-space:nowrap; }
+  #roadHorizon{ stroke:var(--road); stroke-width:10; fill:none; stroke-linecap:round; stroke-dasharray:1 16; opacity:.7; }
+  .startMarker .sdate{ margin-top:4px; font-size:11.5px; font-weight:700; opacity:.8; }
+  .startMarker{
+    position:absolute; left:14px; max-width:160px; padding:8px 12px;
+    background:var(--ink); color:var(--paper); font-size:12.5px; line-height:1.35;
+    border-radius:4px; cursor:pointer; box-shadow:0 6px 12px -6px rgba(0,0,0,.4);
+  }
+  .startMarker::after{
+    content:''; position:absolute; right:-6px; top:50%; transform:translateY(-50%);
+    border-top:6px solid transparent; border-bottom:6px solid transparent; border-left:6px solid var(--ink);
+  }
+
+  #empty{
+    position:absolute; top:240px; left:50%; transform:translateX(-50%);
+    text-align:center; color:var(--ink-soft); pointer-events:none; width:300px; line-height:1.5;
+  }
+  #empty b{ color:var(--ink); font-weight:600; }
+
+  /* Bienvenida */
+  #welcome{
+    position:fixed; inset:0; z-index:300; background:var(--paper);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px; text-align:center; transition:opacity .35s ease, visibility .35s;
+  }
+  #welcome.hidden{ opacity:0; visibility:hidden; pointer-events:none; }
+  #welcome svg{ margin-bottom:18px; max-width:100%; }
+  #welcome h2{ font-size:26px; font-weight:600; margin:0 0 8px; text-wrap:balance; }
+  #welcome p{ font-size:15px; line-height:1.55; color:var(--ink-soft); margin:0 0 26px; max-width:380px; text-wrap:balance; }
+
+  .btn{
+    font-size:13.5px; border:1px solid var(--ink); background:var(--ink); color:var(--paper);
+    border-radius:999px; padding:9px 20px; cursor:pointer;
+  }
+  .btn.ghost{ background:transparent; color:var(--ink); border-color:var(--line); }
+  .btn.ghost:hover{ background:var(--line); }
+  #welcome .btn{ font-size:15px; padding:11px 26px; }
+
+  /* Tarjeta guía */
+  #coach{
+    position:fixed; z-index:150; width:min(380px, calc(100vw - 24px));
+    background:var(--paper); color:var(--ink); border:1px solid var(--line); border-radius:10px;
+    padding:16px 18px 14px; box-shadow:0 24px 50px -18px rgba(0,0,0,.5);
+  }
+  .coach-dots{ display:flex; gap:6px; margin-bottom:10px; }
+  .cdot{ width:7px; height:7px; border-radius:50%; background:var(--line); }
+  .cdot.on{ background:var(--ink); }
+  .coach-title{ font-size:16px; font-weight:600; margin-bottom:4px; }
+  .coach-text{ margin:0; font-size:14px; line-height:1.55; }
+  .coach-text strong{ font-weight:600; }
+  .coach-examples{ margin:8px 0 0; padding-left:18px; color:var(--ink-soft); font-size:13.5px; line-height:1.55; }
+  #coachInput{
+    width:100%; margin-top:12px; font-size:14px; padding:9px 12px; color:var(--ink);
+    border:1px solid var(--line); border-radius:6px; background:transparent;
+  }
+  #coachInput.invalid{ border-color:#c0564a; }
+  .coach-when{ display:flex; gap:8px; align-items:center; margin-top:8px; font-size:13.5px; color:var(--ink-soft); }
+  .coach-when select,.coach-when input{
+    font-size:14px; padding:8px 10px; color:var(--ink); border:1px solid var(--line); border-radius:6px; background:transparent;
+  }
+  .coach-when input{ width:78px; }
+  .coach-when .invalid{ border-color:#c0564a; }
+  .coach-when option{ color:#2c2620; }
+  .coach-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+  kbd{
+    font-family:inherit; font-size:12.5px; padding:1px 7px; border:1px solid var(--ink-soft);
+    border-radius:4px; background:var(--line); font-weight:600;
+  }
+  @keyframes nudge{ 0%,100%{ transform:translateX(0); } 50%{ transform:translateX(-8px); } }
+  .coach-arrow{ display:none; position:absolute; left:-42px; top:14px; width:32px; height:32px; color:var(--ink); animation:nudge 1s ease-in-out infinite; }
+  #coach.pointer-left .coach-arrow{ display:block; }
+
+  @media (max-width:700px){
+    #board{ left:0; }
+    #sidebar{ box-shadow:0 0 40px rgba(0,0,0,.25); }
+    .coach-arrow{ display:none !important; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    #sidebar.pulse{ animation:none; box-shadow:inset -5px 0 0 0 var(--ink-soft); }
+    .coach-arrow{ animation:none; }
+    #welcome{ transition:none; }
+  }
+</style>
+
+<header>
+  <h1>Mi línea de tiempo</h1>
+  <div class="spacer"></div>
+  <button class="pill" id="helpBtn" type="button">Instrucciones</button>
+  <button class="pill" id="toggleSidebar" type="button">Activadores</button>
+  <button class="pill" id="goToday" type="button">Ir a hoy</button>
+  <button class="pill" id="toggleText" type="button">Ocultar textos</button>
+  <button class="pill" id="addBtn" type="button">+ Hito</button>
+  <button class="pill" id="clearBtn" type="button">Vaciar</button>
+</header>
+
+<div id="sidebar">
+  <h2>Activadores</h2>
+  <details class="trigger">
+    <summary>Educación</summary>
+    <ul>
+      <li>Un curso o materia que te haya marcado.</li>
+      <li>Un logro que te genere orgullo.</li>
+    </ul>
+  </details>
+  <details class="trigger">
+    <summary>Laboral</summary>
+    <ul>
+      <li>Un empleo que haya sido un antes y después para ti.</li>
+      <li>Alguna dificultad (desempleo, crisis en el trabajo, etc).</li>
+      <li>Algún ascenso, proyecto exitoso, inicio de un emprendimiento, etc.</li>
+    </ul>
+  </details>
+  <details class="trigger">
+    <summary>Personal</summary>
+    <ul>
+      <li>Un viaje significativo.</li>
+      <li>Una crisis que enfrentaste.</li>
+      <li>Una decisión (rupturas, mudanzas, etc).</li>
+    </ul>
+  </details>
+</div>
+
+<div id="board">
+  <div id="canvas">
+    <svg id="roadSvg" width="2600" height="780" aria-hidden="true">
+      <path id="roadHorizon" d=""></path>
+      <path id="roadBase" d=""></path>
+      <path id="roadTexture" d=""></path>
+    </svg>
+  </div>
+  <div id="empty">Tu línea de tiempo está vacía.<br><b>Haz doble clic</b> en la pantalla para crear tu primer hito.</div>
+</div>
+
+<div id="coach" role="dialog" aria-live="polite" hidden></div>
+
+<div id="welcome">
+  <svg width="230" height="76" viewBox="0 0 230 76" aria-hidden="true">
+    <path d="M6 62 C 44 62, 54 38, 96 40 S 158 58, 188 38 S 214 26, 224 24" stroke="var(--road)" stroke-width="9" fill="none" stroke-linecap="round"/>
+    <line x1="188" y1="38" x2="188" y2="8" stroke="var(--ink)" stroke-width="2"/>
+    <path d="M188 8 L212 14 L188 21 Z" fill="#e8a9a1"/>
+    <circle cx="188" cy="38" r="5" fill="var(--ink)"/>
+  </svg>
+  <h2>Tu línea de tiempo</h2>
+  <p>Un recorrido por los hitos que te trajeron hasta aquí.</p>
+  <button class="btn" id="startJourney" type="button">Comenzar viaje</button>
+</div>
+
+<script>
+(function(){
+  var KEY = 'linea-tiempo-hitos-fechas-v1';
+  var MONTHS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  var PPM = 22, X0 = 200, HORIZON = 520, MINW = 2000;
+  var COLORS = ['#f4d36b','#9fd0c4','#e8a9a1','#b7c9ec','#d9bfe8','#bfd99a','#f2b989','#d8d2c2'];
+  var SIDEBAR_W = 230;
+  var canvas = document.getElementById('canvas');
+  var board = document.getElementById('board');
+  var empty = document.getElementById('empty');
+  var sidebar = document.getElementById('sidebar');
+  var welcome = document.getElementById('welcome');
+  var coach = document.getElementById('coach');
+  var toggleTextBtn = document.getElementById('toggleText');
+  var clearBtn = document.getElementById('clearBtn');
+
+  var ROAD = { width:2600, startY:620, endY:440, amplitude:30, wavelength:900 };
+  var _now = new Date();
+  var TODAY_M = _now.getFullYear() * 12 + _now.getMonth();
+  var M = { startM:TODAY_M - 60, todayM:TODAY_M, todayX:0, width:2600 };
+  function fmt(m){ return MONTHS[((m % 12) + 12) % 12] + ' ' + Math.floor(m / 12); }
+  function dateToX(m){ return X0 + (m - M.startM) * PPM; }
+  function xToDate(ax){ return Math.max(M.startM, Math.min(M.todayM, Math.round((ax - X0) / PPM) + M.startM)); }
+  function roadY(x){
+    var t = Math.max(0, Math.min(1, x / ROAD.width));
+    var linear = ROAD.startY + (ROAD.endY - ROAD.startY) * t;
+    var wave = ROAD.amplitude * Math.sin((x / ROAD.wavelength) * 2 * Math.PI);
+    return linear + wave;
+  }
+  function buildRoadPath(x1, x2){
+    var pts = [];
+    for(var x = x1; x < x2; x += 20){ pts.push(x + ',' + roadY(x).toFixed(1)); }
+    pts.push(x2 + ',' + roadY(x2).toFixed(1));
+    return 'M' + pts.join(' L');
+  }
+
+  var notes = [];
+  var startPoint = null;
+  var startDate = null;
+  var hideText = false;
+  var guideDone = false;
+  var guideOpen = false, guideStep = 0, guideMode = 'full';
+
+  function isNarrow(){ return window.innerWidth <= 700; }
+
+  /* ---------- Guardado ---------- */
+  function save(){
+    try{ localStorage.setItem(KEY, JSON.stringify({ notes:notes, startPoint:startPoint, startDate:startDate, hideText:hideText, guideDone:guideDone })); }catch(e){}
+  }
+  function load(){
+    var base = { notes:[], startPoint:null, startDate:null, hideText:false, guideDone:false };
+    try{
+      var raw = localStorage.getItem(KEY);
+      if(!raw) return base;
+      var p = JSON.parse(raw);
+      if(Array.isArray(p)){ base.notes = p; return base; }
+      base.notes = p.notes || [];
+      base.startPoint = p.startPoint || null;
+      base.startDate = (typeof p.startDate === 'number') ? p.startDate : null;
+      base.hideText = !!p.hideText;
+      base.guideDone = !!p.guideDone;
+      return base;
+    }catch(e){ return base; }
+  }
+
+  function updateEmpty(){ empty.style.display = (notes.length || guideOpen) ? 'none' : 'block'; }
+
+  /* ---------- Punto de partida ---------- */
+  function renderStartMarker(){
+    var old = document.getElementById('startMarker');
+    if(old) old.remove();
+    if(!startPoint) return;
+    var el = document.createElement('div');
+    el.className = 'startMarker';
+    el.id = 'startMarker';
+    var t = document.createElement('div'); t.textContent = startPoint; el.appendChild(t);
+    var d = document.createElement('div'); d.className = 'sdate'; d.textContent = fmt(M.startM); el.appendChild(d);
+    el.title = 'Editar punto de partida';
+    var ry = roadY(X0);
+    el.style.top = (ry - 112) + 'px';
+    el.addEventListener('click', function(){ openGuide(0, 'edit'); });
+    canvas.appendChild(el);
+  }
+
+  /* ---------- Hitos ---------- */
+  function updateMast(n){
+    var noteEl = document.getElementById('note-' + n.id);
+    var mast = document.getElementById('mast-' + n.id);
+    var dot = document.getElementById('dot-' + n.id);
+    if(!noteEl || !mast) return;
+    var anchorX = n.x + 90;
+    var bottomY = n.y + noteEl.offsetHeight;
+    var ry = roadY(anchorX);
+    mast.style.left = anchorX + 'px';
+    mast.style.top = bottomY + 'px';
+    mast.style.height = Math.max(0, ry - bottomY) + 'px';
+    dot.style.left = anchorX + 'px';
+    dot.style.top = ry + 'px';
+  }
+
+  function syncDate(n, el){
+    el = el || document.getElementById('note-' + n.id);
+    if(!el || !el._sel) return;
+    var m = n.date;
+    el._sel.value = String(((m % 12) + 12) % 12);
+    el._yr.value = String(Math.floor(m / 12));
+    el._chip.textContent = String(Math.floor(m / 12));
+    el.setAttribute('data-date', fmt(m));
+  }
+  function clampY(n){
+    var el = document.getElementById('note-' + n.id);
+    if(!el) return;
+    var maxY = roadY(n.x + 90) - (el.offsetHeight + 30);
+    if(n.y > maxY){ n.y = Math.max(10, maxY); el.style.top = n.y + 'px'; }
+  }
+  function setNoteDate(n, m){
+    n.date = Math.max(M.startM, Math.min(M.todayM, m));
+    n.x = dateToX(n.date) - 90;
+    var el = document.getElementById('note-' + n.id);
+    if(el) el.style.left = n.x + 'px';
+    clampY(n);
+    syncDate(n);
+    updateMast(n);
+    save();
+  }
+
+  function makeNoteEl(n){
+    var el = document.createElement('div');
+    el.className = 'note';
+    el.id = 'note-' + n.id;
+    el.style.left = n.x + 'px';
+    el.style.top = n.y + 'px';
+    el.style.background = n.color;
+    el.title = hideText ? (n.text || '') : '';
+
+    var top = document.createElement('div'); top.className = 'top';
+    var colorDot = document.createElement('div');
+    colorDot.className = 'ncolor';
+    colorDot.title = 'Cambiar color';
+    colorDot.style.background = n.color;
+    colorDot.addEventListener('pointerdown', function(ev){ ev.stopPropagation(); });
+    colorDot.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var idx = COLORS.indexOf(n.color);
+      n.color = COLORS[(idx + 1) % COLORS.length];
+      el.style.background = n.color;
+      colorDot.style.background = n.color;
+      save();
+    });
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'del'; del.textContent = '✕'; del.title = 'Eliminar';
+    del.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      notes = notes.filter(function(x){ return x.id !== n.id; });
+      el.remove();
+      var m = document.getElementById('mast-' + n.id); if(m) m.remove();
+      var d = document.getElementById('dot-' + n.id); if(d) d.remove();
+      updateEmpty();
+      save();
+    });
+    top.appendChild(colorDot); top.appendChild(del);
+    el.appendChild(top);
+
+    var ta = document.createElement('textarea');
+    ta.placeholder = 'Escribe tu hito…';
+    ta.value = n.text || '';
+    ta.addEventListener('pointerdown', function(ev){ ev.stopPropagation(); });
+    ta.addEventListener('input', function(){ n.text = ta.value; save(); });
+    el.appendChild(ta);
+
+    var drow = document.createElement('div'); drow.className = 'drow';
+    var sel = document.createElement('select'); sel.title = 'Mes'; sel.setAttribute('aria-label', 'Mes del hito');
+    MONTHS.forEach(function(mn, i){ var o = document.createElement('option'); o.value = i; o.textContent = mn; sel.appendChild(o); });
+    var yr = document.createElement('input'); yr.type = 'text'; yr.inputMode = 'numeric'; yr.maxLength = 4; yr.title = 'Año'; yr.setAttribute('aria-label', 'Año del hito');
+    drow.appendChild(sel); drow.appendChild(yr);
+    drow.addEventListener('pointerdown', function(ev){ ev.stopPropagation(); });
+    function commitDate(){
+      var y = parseInt(yr.value, 10);
+      if(isNaN(y) || y < 1900 || y > 2200){ syncDate(n); return; }
+      setNoteDate(n, y * 12 + parseInt(sel.value, 10));
+    }
+    sel.addEventListener('change', commitDate);
+    yr.addEventListener('change', commitDate);
+    yr.addEventListener('keydown', function(ev){ if(ev.key === 'Enter') yr.blur(); });
+    el.appendChild(drow);
+    var chip = document.createElement('div'); chip.className = 'ychip'; el.appendChild(chip);
+    el._sel = sel; el._yr = yr; el._chip = chip;
+    syncDate(n, el);
+
+    var dragging = false, offX = 0, offY = 0;
+    el.addEventListener('pointerdown', function(ev){
+      if(ev.target === ta || ev.target === del || ev.target === colorDot || ev.target.closest('.drow')) return;
+      dragging = true;
+      el.classList.add('dragging');
+      el.setPointerCapture(ev.pointerId);
+      var br = board.getBoundingClientRect();
+      offX = ev.clientX - br.left + board.scrollLeft - n.x;
+      offY = ev.clientY - br.top + board.scrollTop - n.y;
+    });
+    el.addEventListener('pointermove', function(ev){
+      if(!dragging) return;
+      var br = board.getBoundingClientRect();
+      var x = ev.clientX - br.left + board.scrollLeft - offX;
+      var y = ev.clientY - br.top + board.scrollTop - offY;
+      var m = xToDate(x + 90);
+      x = dateToX(m) - 90;
+      y = Math.max(10, Math.min(y, roadY(x + 90) - (el.offsetHeight + 30)));
+      el.style.left = x + 'px'; el.style.top = y + 'px';
+      n.x = x; n.y = y; n.date = m;
+      syncDate(n, el);
+      updateMast(n);
+    });
+    function endDrag(ev){
+      if(!dragging) return;
+      dragging = false;
+      el.classList.remove('dragging');
+      try{ el.releasePointerCapture(ev.pointerId); }catch(e){}
+      save();
+    }
+    el.addEventListener('pointerup', endDrag);
+    el.addEventListener('pointercancel', endDrag);
+
+    return el;
+  }
+
+  function attachNote(n){
+    canvas.appendChild(makeNoteEl(n));
+    var mast = document.createElement('div');
+    mast.className = 'mast'; mast.id = 'mast-' + n.id;
+    canvas.appendChild(mast);
+    var dot = document.createElement('div');
+    dot.className = 'flagdot'; dot.id = 'dot-' + n.id;
+    canvas.appendChild(dot);
+    updateMast(n);
+  }
+
+  function addNote(x, y){
+    if(hideText) setHideText(false);
+    var id = 'n' + Date.now() + Math.random().toString(16).slice(2);
+    var ax = x != null ? x : (300 + Math.random()*400);
+    var m = xToDate(ax + 90);
+    ax = dateToX(m) - 90;
+    var ay = y != null ? y : (roadY(ax + 90) - 220 - Math.random()*40);
+    var n = { id:id, x:ax, y:ay, date:m, color:COLORS[0], text:'' };
+    notes.push(n);
+    attachNote(n);
+    clampY(n);
+    updateEmpty();
+    save();
+    var ta = document.querySelector('#note-' + id + ' textarea');
+    if(ta) ta.focus();
+  }
+
+  function renderAll(){
+    Array.from(canvas.querySelectorAll('.note, .mast, .flagdot')).forEach(function(e){ e.remove(); });
+    notes.forEach(attachNote);
+    applyLayout();
+    updateEmpty();
+  }
+
+  /* ---------- Escala de tiempo real ---------- */
+  function applyLayout(){
+    M.startM = (startDate != null) ? startDate : TODAY_M - 60;
+    M.todayM = TODAY_M;
+    M.todayX = dateToX(M.todayM);
+    M.width = Math.max(MINW, M.todayX + HORIZON);
+    ROAD.width = M.width;
+    canvas.style.width = M.width + 'px';
+    var svg = document.getElementById('roadSvg');
+    svg.setAttribute('width', M.width);
+    document.getElementById('roadBase').setAttribute('d', buildRoadPath(0, M.todayX));
+    document.getElementById('roadTexture').setAttribute('d', buildRoadPath(0, M.todayX));
+    document.getElementById('roadHorizon').setAttribute('d', buildRoadPath(M.todayX, M.width));
+
+    Array.from(canvas.querySelectorAll('.decor')).forEach(function(e){ e.remove(); });
+    function add(cls, css, html){
+      var e = document.createElement('div'); e.className = 'decor ' + cls;
+      Object.keys(css).forEach(function(k){ e.style[k] = css[k]; });
+      if(html != null) e.innerHTML = html;
+      canvas.appendChild(e); return e;
+    }
+    // Mojones de año (cada 1 de enero dentro del recorrido)
+    for(var y = Math.floor(M.startM / 12) + 1; y * 12 <= M.todayM; y++){
+      var x = dateToX(y * 12), ry = roadY(x);
+      add('ypost', { left:(x - 1) + 'px', top:(ry + 9) + 'px' });
+      add('ylabel', { left:x + 'px', top:(ry + 28) + 'px' }, String(y));
+    }
+    // Punto de partida
+    var sx = dateToX(M.startM), sry = roadY(sx);
+    if(startPoint){ add('spost', { left:(sx - 1) + 'px', top:(sry - 112) + 'px', height:'112px' }); }
+    add('flagdot', { left:sx + 'px', top:sry + 'px' }).style.background = 'var(--ink)';
+    // Hoy
+    var hry = roadY(M.todayX);
+    var hoy = add('hoy', { left:(M.todayX - 1) + 'px', top:(hry - 96) + 'px', height:'96px' }, '<div class="tag">Hoy · ' + fmt(M.todayM) + '</div>');
+    add('flagdot', { left:M.todayX + 'px', top:hry + 'px' });
+    // Horizonte
+    add('horizon', { left:(M.todayX + 70) + 'px', top:(roadY(M.todayX + 70) - 44) + 'px' }, 'Lo que viene…');
+
+    renderStartMarker();
+    notes.forEach(function(n){
+      if(typeof n.date !== 'number') n.date = xToDate((n.x || 0) + 90);
+      n.date = Math.max(M.startM, Math.min(M.todayM, n.date));
+      n.x = dateToX(n.date) - 90;
+      var el = document.getElementById('note-' + n.id);
+      if(el) el.style.left = n.x + 'px';
+      clampY(n);
+      syncDate(n);
+      updateMast(n);
+    });
+  }
+
+  /* ---------- Mostrar / ocultar textos ---------- */
+  function setHideText(v){
+    hideText = v;
+    canvas.classList.toggle('texts-hidden', hideText);
+    notes.forEach(function(n){
+      var el = document.getElementById('note-' + n.id);
+      if(el) el.title = hideText ? (n.text || '') : '';
+      clampY(n);
+      updateMast(n);
+    });
+    toggleTextBtn.textContent = hideText ? 'Mostrar textos' : 'Ocultar textos';
+    save();
+  }
+
+  /* ---------- Guía paso a paso ---------- */
+  var ARROW = '<svg class="coach-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H5M11 6l-6 6 6 6"/></svg>';
+  var STEPS = [
+    { title:'Define el punto de partida',
+      rest:'Resume el comienzo en una frase e indica cuándo ocurrió (mes y año). Recuerda que puedes editarlo en cualquier momento. Por ejemplo:',
+      examples:['El día de mi graduación del colegio','El ingreso a la universidad','Mi primer empleo'],
+      input:true },
+    { lead:'Guíate con los activadores para crear los hitos:',
+      rest:'son frases cortas que te ayudan a recordar.', arrow:true },
+    { lead:'Doble clic en la pantalla para crear un hito:',
+      rest:'arrástralo hacia los lados para ubicarlo en el momento en que ocurrió: su fecha se ajusta sola y también puedes escribirla en el hito. O hacia arriba y hacia abajo para separarlo de otros.' },
+    { lead:'Presiona la tecla <kbd>M</kbd> para mostrar el texto de cada hito.',
+      rest:'Presiona la tecla <kbd>O</kbd> para ocultarlos.' }
+  ];
+
+  function showSidebar(show){
+    sidebar.classList.toggle('hidden', !show);
+    board.classList.toggle('full', !show);
+  }
+
+  function positionCoach(s){
+    var st = coach.style;
+    st.left = st.right = st.top = st.bottom = st.transform = st.width = '';
+    if(isNarrow()){
+      st.left = '12px'; st.right = '12px'; st.width = 'auto'; st.bottom = (12) + 'px';
+    }else if(s.arrow){
+      st.left = (SIDEBAR_W + 44) + 'px'; st.top = '104px';
+    }else{
+      var bl = board.classList.contains('full') ? 0 : SIDEBAR_W;
+      st.left = (bl + (window.innerWidth - bl) / 2) + 'px';
+      st.top = '76px';
+      st.transform = 'translateX(-50%)';
+    }
+  }
+
+  function renderCoach(){
+    var s = STEPS[guideStep];
+    var edit = guideMode === 'edit';
+    var last = guideStep === STEPS.length - 1;
+    var h = '';
+    if(!edit){
+      h += '<div class="coach-dots" aria-hidden="true">';
+      for(var i = 0; i < STEPS.length; i++){ h += '<span class="cdot' + (i === guideStep ? ' on' : '') + '"></span>'; }
+      h += '</div>';
+    }
+    if(s.arrow) h += ARROW;
+    if(s.title){
+      h += '<div class="coach-title">' + s.title + '</div><p class="coach-text">' + s.rest + '</p>';
+    }else{
+      h += '<p class="coach-text"><strong>' + s.lead + '</strong> ' + s.rest + '</p>';
+    }
+    if(s.examples){
+      h += '<ul class="coach-examples">' + s.examples.map(function(t){ return '<li>' + t + '</li>'; }).join('') + '</ul>';
+    }
+    if(s.input){
+      h += '<input id="coachInput" type="text" maxlength="60" placeholder="Escribe tu punto de partida" aria-label="Punto de partida">';
+      h += '<div class="coach-when"><span>¿Cuándo fue?</span><select id="coachMon" aria-label="Mes"><option value="">Mes</option>' +
+        MONTHS.map(function(mn, i){ return '<option value="' + i + '">' + mn + '</option>'; }).join('') +
+        '</select><input id="coachYear" type="text" inputmode="numeric" maxlength="4" placeholder="Año" aria-label="Año"></div>';
+    }
+    h += '<div class="coach-actions">';
+    if(edit){
+      h += '<button class="btn ghost" id="coachBack" type="button">Cancelar</button><button class="btn" id="coachNext" type="button">Guardar</button>';
+    }else{
+      if(guideStep > 0) h += '<button class="btn ghost" id="coachBack" type="button">Atrás</button>';
+      h += '<button class="btn" id="coachNext" type="button">' + (last ? 'Entendido' : 'Siguiente') + '</button>';
+    }
+    h += '</div>';
+    coach.innerHTML = h;
+    coach.classList.toggle('pointer-left', !!s.arrow && !isNarrow());
+    coach.hidden = false;
+    positionCoach(s);
+
+    if(s.arrow){ showSidebar(true); sidebar.classList.add('pulse'); }
+    else{ sidebar.classList.remove('pulse'); }
+
+    var input = document.getElementById('coachInput');
+    if(input){
+      input.value = startPoint || '';
+      var cm = document.getElementById('coachMon'), cy = document.getElementById('coachYear');
+      if(startDate != null){ cm.value = String(startDate % 12); cy.value = String(Math.floor(startDate / 12)); }
+      cm.addEventListener('change', function(){ cm.classList.remove('invalid'); });
+      cy.addEventListener('input', function(){ cy.classList.remove('invalid'); });
+      cy.addEventListener('keydown', function(ev){ if(ev.key === 'Enter') next(); });
+      input.addEventListener('input', function(){ input.classList.remove('invalid'); });
+      input.addEventListener('keydown', function(ev){ if(ev.key === 'Enter') next(); });
+      setTimeout(function(){ input.focus(); }, 0);
+    }
+    document.getElementById('coachNext').addEventListener('click', next);
+    var back = document.getElementById('coachBack');
+    if(back) back.addEventListener('click', function(){
+      if(edit){ closeGuide(); return; }
+      guideStep = Math.max(0, guideStep - 1);
+      renderCoach();
+    });
+  }
+
+  function next(){
+    var s = STEPS[guideStep];
+    if(s.input){
+      var input = document.getElementById('coachInput');
+      var v = input.value.trim();
+      var cm = document.getElementById('coachMon'), cy = document.getElementById('coachYear');
+      var yy = parseInt(cy.value, 10), mm = parseInt(cm.value, 10);
+      var okText = !!v, okMon = !isNaN(mm), okYear = !isNaN(yy) && yy >= 1950 && yy <= Math.floor(TODAY_M / 12);
+      var dm = yy * 12 + mm;
+      if(okMon && okYear && dm > TODAY_M){ okMon = false; okYear = false; }
+      if(!okText || !okMon || !okYear){
+        if(!okText) input.classList.add('invalid');
+        if(!okMon) cm.classList.add('invalid');
+        if(!okYear) cy.classList.add('invalid');
+        (!okText ? input : !okMon ? cm : cy).focus();
+        return;
+      }
+      startPoint = v;
+      startDate = dm;
+      save();
+      applyLayout();
+    }
+    if(guideMode === 'edit'){ closeGuide(); return; }
+    if(guideStep === STEPS.length - 1){ guideDone = true; save(); closeGuide(); return; }
+    guideStep++;
+    renderCoach();
+  }
+
+  function openGuide(step, mode){
+    guideMode = mode || 'full';
+    guideStep = step || 0;
+    guideOpen = true;
+    updateEmpty();
+    renderCoach();
+  }
+  function closeGuide(){
+    guideOpen = false;
+    coach.hidden = true;
+    sidebar.classList.remove('pulse');
+    updateEmpty();
+  }
+
+  /* ---------- Controles ---------- */
+  document.getElementById('startJourney').addEventListener('click', function(){
+    welcome.classList.add('hidden');
+    setTimeout(function(){ openGuide(0, 'full'); }, 450);
+  });
+  document.getElementById('helpBtn').addEventListener('click', function(){ openGuide(0, 'full'); });
+  document.getElementById('goToday').addEventListener('click', function(){
+    board.scrollTo({ left:Math.max(0, M.todayX - board.clientWidth / 2), behavior:'smooth' });
+  });
+  document.getElementById('addBtn').addEventListener('click', function(){
+    addNote(board.scrollLeft + 260 + Math.random()*120);
+  });
+  toggleTextBtn.addEventListener('click', function(){ setHideText(!hideText); });
+  document.getElementById('toggleSidebar').addEventListener('click', function(){
+    showSidebar(sidebar.classList.contains('hidden'));
+  });
+
+  var clearArmed = false, clearTimer = null;
+  function disarmClear(){ clearArmed = false; clearBtn.textContent = 'Vaciar'; clearTimeout(clearTimer); }
+  clearBtn.addEventListener('click', function(){
+    if(!notes.length) return;
+    if(!clearArmed){
+      clearArmed = true;
+      clearBtn.textContent = 'Confirmar: vaciar todo';
+      clearTimer = setTimeout(disarmClear, 3500);
+      return;
+    }
+    disarmClear();
+    notes = [];
+    renderAll();
+    save();
+  });
+
+  board.addEventListener('dblclick', function(ev){
+    if(ev.target.closest('.note') || ev.target.closest('.startMarker')) return;
+    var br = board.getBoundingClientRect();
+    var x = ev.clientX - br.left + board.scrollLeft - 90;
+    var y = ev.clientY - br.top + board.scrollTop - 60;
+    x = Math.max(0, x);
+    y = Math.max(10, Math.min(y, roadY(x + 90) - 150));
+    addNote(x, y);
+  });
+
+  document.addEventListener('keydown', function(ev){
+    if(ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    var tag = (ev.target.tagName || '').toLowerCase();
+    if(tag === 'textarea' || tag === 'input' || ev.target.isContentEditable) return;
+    if(!welcome.classList.contains('hidden')) return;
+    var k = ev.key.toLowerCase();
+    if(k === 'm') setHideText(false);
+    else if(k === 'o') setHideText(true);
+  });
+
+  window.addEventListener('resize', function(){ if(guideOpen) positionCoach(STEPS[guideStep]); });
+
+  /* ---------- Inicio ---------- */
+
+  var loaded = load();
+  notes = loaded.notes;
+  startPoint = loaded.startPoint;
+  startDate = loaded.startDate;
+  hideText = loaded.hideText;
+  guideDone = loaded.guideDone;
+
+  if(isNarrow()) showSidebar(false);
+  canvas.classList.toggle('texts-hidden', hideText);
+  toggleTextBtn.textContent = hideText ? 'Mostrar textos' : 'Ocultar textos';
+  renderAll();
+  board.scrollTop = Math.max(0, ROAD.startY + 140 - board.clientHeight);
+  if(guideDone) welcome.classList.add('hidden');
+})();
+</script>
+</body></html>
