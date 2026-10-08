@@ -155,7 +155,7 @@
   #welcome.hidden{ opacity:0; visibility:hidden; pointer-events:none; }
   #welcome svg{ margin-bottom:18px; max-width:100%; }
   #welcome h2{ font-size:26px; font-weight:600; margin:0 0 8px; text-wrap:balance; }
-  #welcome p{ font-size:15px; line-height:1.55; color:var(--ink-soft); margin:0 0 26px; max-width:380px; text-wrap:balance; }
+  #welcome p{ font-size:15px; line-height:1.55; color:var(--ink-soft); margin:0; max-width:380px; text-wrap:balance; }
 
   .btn{
     font-size:13.5px; border:1px solid var(--ink); background:var(--ink); color:var(--paper);
@@ -271,7 +271,6 @@
   </svg>
   <h2>Tu línea de tiempo</h2>
   <p>Un recorrido por los hitos que te trajeron hasta aquí.</p>
-  <button class="btn" id="startJourney" type="button">Comenzar viaje</button>
 </div>
 
 <script>
@@ -350,7 +349,7 @@
     el.className = 'startMarker';
     el.id = 'startMarker';
     var t = document.createElement('div'); t.textContent = startPoint; el.appendChild(t);
-    var d = document.createElement('div'); d.className = 'sdate'; d.textContent = fmt(M.startM); el.appendChild(d);
+    var d = document.createElement('div'); d.className = 'sdate'; d.textContent = String(Math.floor(M.startM / 12)); el.appendChild(d);
     el.title = 'Editar punto de partida';
     var ry = roadY(X0);
     el.style.top = (ry - 112) + 'px';
@@ -378,10 +377,10 @@
     el = el || document.getElementById('note-' + n.id);
     if(!el || !el._sel) return;
     var m = n.date;
-    el._sel.value = String(((m % 12) + 12) % 12);
+    el._sel.value = n.hasMonth ? String(((m % 12) + 12) % 12) : '';
     el._yr.value = String(Math.floor(m / 12));
     el._chip.textContent = String(Math.floor(m / 12));
-    el.setAttribute('data-date', fmt(m));
+    el.setAttribute('data-date', n.hasMonth ? fmt(m) : String(Math.floor(m / 12)));
   }
   function clampY(n){
     var el = document.getElementById('note-' + n.id);
@@ -389,7 +388,8 @@
     var maxY = roadY(n.x + 90) - (el.offsetHeight + 30);
     if(n.y > maxY){ n.y = Math.max(10, maxY); el.style.top = n.y + 'px'; }
   }
-  function setNoteDate(n, m){
+  function setNoteDate(n, m, hasMonth){
+    n.hasMonth = !!hasMonth;
     n.date = Math.max(M.startM, Math.min(M.todayM, m));
     n.x = dateToX(n.date) - 90;
     var el = document.getElementById('note-' + n.id);
@@ -447,6 +447,7 @@
 
     var drow = document.createElement('div'); drow.className = 'drow';
     var sel = document.createElement('select'); sel.title = 'Mes'; sel.setAttribute('aria-label', 'Mes del hito');
+    var o0 = document.createElement('option'); o0.value = ''; o0.textContent = 'Mes'; sel.appendChild(o0);
     MONTHS.forEach(function(mn, i){ var o = document.createElement('option'); o.value = i; o.textContent = mn; sel.appendChild(o); });
     var yr = document.createElement('input'); yr.type = 'text'; yr.inputMode = 'numeric'; yr.maxLength = 4; yr.title = 'Año'; yr.setAttribute('aria-label', 'Año del hito');
     drow.appendChild(sel); drow.appendChild(yr);
@@ -454,7 +455,9 @@
     function commitDate(){
       var y = parseInt(yr.value, 10);
       if(isNaN(y) || y < 1900 || y > 2200){ syncDate(n); return; }
-      setNoteDate(n, y * 12 + parseInt(sel.value, 10));
+      var hasMon = sel.value !== '';
+      var mo = hasMon ? parseInt(sel.value, 10) : ((n.date % 12) + 12) % 12;
+      setNoteDate(n, y * 12 + mo, hasMon);
     }
     sel.addEventListener('change', commitDate);
     yr.addEventListener('change', commitDate);
@@ -518,7 +521,7 @@
     var m = xToDate(ax + 90);
     ax = dateToX(m) - 90;
     var ay = y != null ? y : (roadY(ax + 90) - 220 - Math.random()*40);
-    var n = { id:id, x:ax, y:ay, date:m, color:COLORS[0], text:'' };
+    var n = { id:id, x:ax, y:ay, date:m, hasMonth:false, color:COLORS[0], text:'' };
     notes.push(n);
     attachNote(n);
     clampY(n);
@@ -604,13 +607,13 @@
   var ARROW = '<svg class="coach-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H5M11 6l-6 6 6 6"/></svg>';
   var STEPS = [
     { title:'Define el punto de partida',
-      rest:'Resume el comienzo en una frase e indica cuándo ocurrió (mes y año). Recuerda que puedes editarlo en cualquier momento. Por ejemplo:',
+      rest:'Resume el comienzo en una frase e incluye el año. Recuerda que puedes editarlo en cualquier momento. Por ejemplo:',
       examples:['El día de mi graduación del colegio','El ingreso a la universidad','Mi primer empleo'],
       input:true },
     { lead:'Guíate con los activadores para crear los hitos:',
       rest:'son frases cortas que te ayudan a recordar.', arrow:true },
     { lead:'Doble clic en la pantalla para crear un hito:',
-      rest:'arrástralo hacia los lados para ubicarlo en el momento en que ocurrió: su fecha se ajusta sola y también puedes escribirla en el hito. O hacia arriba y hacia abajo para separarlo de otros.' },
+      rest:'arrástralo hacia los lados para ordenarlo en la línea de tiempo. O hacia arriba y hacia abajo para separarlo de otros.' },
     { lead:'Presiona la tecla <kbd>M</kbd> para mostrar el texto de cada hito.',
       rest:'Presiona la tecla <kbd>O</kbd> para ocultarlos.' }
   ];
@@ -661,9 +664,7 @@
     }
     if(s.input){
       h += '<input id="coachInput" type="text" maxlength="60" placeholder="Escribe tu punto de partida" aria-label="Punto de partida">';
-      h += '<div class="coach-when"><span>¿Cuándo fue?</span><select id="coachMon" aria-label="Mes"><option value="">Mes</option>' +
-        MONTHS.map(function(mn, i){ return '<option value="' + i + '">' + mn + '</option>'; }).join('') +
-        '</select><input id="coachYear" type="text" inputmode="numeric" maxlength="4" placeholder="Año" aria-label="Año"></div>';
+      h += '<div class="coach-when"><span>Año</span><input id="coachYear" type="text" inputmode="numeric" maxlength="4" placeholder="Ej. 2019" aria-label="Año del punto de partida"></div>';
     }
     h += '<div class="coach-actions">';
     if(edit){
@@ -684,9 +685,8 @@
     var input = document.getElementById('coachInput');
     if(input){
       input.value = startPoint || '';
-      var cm = document.getElementById('coachMon'), cy = document.getElementById('coachYear');
-      if(startDate != null){ cm.value = String(startDate % 12); cy.value = String(Math.floor(startDate / 12)); }
-      cm.addEventListener('change', function(){ cm.classList.remove('invalid'); });
+      var cy = document.getElementById('coachYear');
+      if(startDate != null){ cy.value = String(Math.floor(startDate / 12)); }
       cy.addEventListener('input', function(){ cy.classList.remove('invalid'); });
       cy.addEventListener('keydown', function(ev){ if(ev.key === 'Enter') next(); });
       input.addEventListener('input', function(){ input.classList.remove('invalid'); });
@@ -707,16 +707,14 @@
     if(s.input){
       var input = document.getElementById('coachInput');
       var v = input.value.trim();
-      var cm = document.getElementById('coachMon'), cy = document.getElementById('coachYear');
-      var yy = parseInt(cy.value, 10), mm = parseInt(cm.value, 10);
-      var okText = !!v, okMon = !isNaN(mm), okYear = !isNaN(yy) && yy >= 1950 && yy <= Math.floor(TODAY_M / 12);
-      var dm = yy * 12 + mm;
-      if(okMon && okYear && dm > TODAY_M){ okMon = false; okYear = false; }
-      if(!okText || !okMon || !okYear){
+      var cy = document.getElementById('coachYear');
+      var yy = parseInt(cy.value, 10);
+      var okText = !!v, okYear = !isNaN(yy) && yy >= 1950 && yy <= Math.floor(TODAY_M / 12);
+      var dm = yy * 12;
+      if(!okText || !okYear){
         if(!okText) input.classList.add('invalid');
-        if(!okMon) cm.classList.add('invalid');
         if(!okYear) cy.classList.add('invalid');
-        (!okText ? input : !okMon ? cm : cy).focus();
+        (!okText ? input : cy).focus();
         return;
       }
       startPoint = v;
@@ -745,10 +743,6 @@
   }
 
   /* ---------- Controles ---------- */
-  document.getElementById('startJourney').addEventListener('click', function(){
-    welcome.classList.add('hidden');
-    setTimeout(function(){ openGuide(0, 'full'); }, 450);
-  });
   document.getElementById('helpBtn').addEventListener('click', function(){ openGuide(0, 'full'); });
   document.getElementById('goToday').addEventListener('click', function(){
     board.scrollTo({ left:Math.max(0, M.todayX - board.clientWidth / 2), behavior:'smooth' });
@@ -830,7 +824,14 @@
   toggleTextBtn.textContent = hideText ? 'Mostrar textos' : 'Ocultar textos';
   renderAll();
   board.scrollTop = Math.max(0, ROAD.startY + 140 - board.clientHeight);
-  if(guideDone) welcome.classList.add('hidden');
+  if(guideDone){ welcome.classList.add('hidden'); }
+  else{
+    // La bienvenida se muestra el tiempo suficiente para leerla y luego pasa sola a la guía
+    setTimeout(function(){
+      welcome.classList.add('hidden');
+      setTimeout(function(){ openGuide(0, 'full'); }, 450);
+    }, 4500);
+  }
 })();
 </script>
 </body></html>
