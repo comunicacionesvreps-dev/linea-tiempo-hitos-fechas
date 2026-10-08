@@ -110,12 +110,12 @@
     font-family:inherit; font-size:13.5px; line-height:1.4; color:inherit; outline:none; cursor:text;
   }
   /* Textos ocultos: cada hito se reduce a un banderín del mismo color, centrado sobre su asta */
-  .texts-hidden .note{
+  .texts-hidden .note:not(.open){
     width:44px; min-height:30px; height:30px; padding:0; margin-left:68px; box-shadow:none; border-radius:0;
     clip-path:polygon(0 0, 100% 0, 80% 50%, 100% 100%, 0 100%);
   }
-  .texts-hidden .note > *{ display:none; }
-  .texts-hidden .note > .ychip{ display:flex; align-items:center; justify-content:center; height:100%; padding-right:7px; font-size:11px; font-weight:800; }
+  .texts-hidden .note:not(.open) > *{ display:none; }
+  .texts-hidden .note:not(.open) > .ychip{ display:flex; align-items:center; justify-content:center; height:100%; padding-right:7px; font-size:11px; font-weight:800; }
 
   /* Fechas: mojones de año, bandera "Hoy", horizonte */
   .decor{ position:absolute; pointer-events:none; }
@@ -373,6 +373,18 @@
     dot.style.top = ry + 'px';
   }
 
+  var lastNoteTap = null;
+  function toggleOpen(n, force){
+    if(!hideText) return;
+    var el = document.getElementById('note-' + n.id);
+    if(!el) return;
+    n.open = (force != null) ? force : !n.open;
+    el.classList.toggle('open', n.open);
+    clampY(n);
+    updateMast(n);
+    save();
+    if(n.open){ var ta = el.querySelector('textarea'); if(ta) ta.focus(); }
+  }
   function syncDate(n, el){
     el = el || document.getElementById('note-' + n.id);
     if(!el || !el._sel) return;
@@ -467,21 +479,11 @@
     el._sel = sel; el._yr = yr; el._chip = chip;
     syncDate(n, el);
 
-    var dragging = false, offX = 0, offY = 0;
-    el.addEventListener('pointerdown', function(ev){
-      if(ev.target === ta || ev.target === del || ev.target === colorDot || ev.target.closest('.drow')) return;
-      dragging = true;
-      el.classList.add('dragging');
-      el.setPointerCapture(ev.pointerId);
+    var dragging = false, offX = 0, offY = 0, lastX = 0, lastY = 0, startX = 0, startY = 0, moved = false, raf = 0, lastTouchToggle = 0;
+    function applyDrag(){
       var br = board.getBoundingClientRect();
-      offX = ev.clientX - br.left + board.scrollLeft - n.x;
-      offY = ev.clientY - br.top + board.scrollTop - n.y;
-    });
-    el.addEventListener('pointermove', function(ev){
-      if(!dragging) return;
-      var br = board.getBoundingClientRect();
-      var x = ev.clientX - br.left + board.scrollLeft - offX;
-      var y = ev.clientY - br.top + board.scrollTop - offY;
+      var x = lastX - br.left + board.scrollLeft - offX;
+      var y = lastY - br.top + board.scrollTop - offY;
       var m = xToDate(x + 90);
       x = dateToX(m) - 90;
       y = Math.max(10, Math.min(y, roadY(x + 90) - (el.offsetHeight + 30)));
@@ -489,22 +491,72 @@
       n.x = x; n.y = y; n.date = m;
       syncDate(n, el);
       updateMast(n);
+    }
+    /* Autodesplazamiento: al acercar el hito al borde del lienzo, la vista avanza sola */
+    function edgeLoop(){
+      if(!dragging) return;
+      var br = board.getBoundingClientRect();
+      var zone = 70, dx = 0, dy = 0;
+      if(lastX > br.right - zone) dx = Math.min(1, (lastX - (br.right - zone)) / zone);
+      else if(lastX < br.left + zone) dx = -Math.min(1, ((br.left + zone) - lastX) / zone);
+      if(lastY > br.bottom - zone) dy = Math.min(1, (lastY - (br.bottom - zone)) / zone);
+      else if(lastY < br.top + 90) dy = -Math.min(1, ((br.top + 90) - lastY) / zone);
+      if(dx || dy){
+        var bx = board.scrollLeft, by = board.scrollTop;
+        board.scrollLeft += dx * 18; board.scrollTop += dy * 14;
+        if(board.scrollLeft !== bx || board.scrollTop !== by) applyDrag();
+      }
+      raf = requestAnimationFrame(edgeLoop);
+    }
+    el.addEventListener('pointerdown', function(ev){
+      if(ev.target === ta || ev.target === del || ev.target === colorDot || ev.target.closest('.drow')) return;
+      dragging = true; moved = false;
+      startX = lastX = ev.clientX; startY = lastY = ev.clientY;
+      el.classList.add('dragging');
+      el.setPointerCapture(ev.pointerId);
+      var br = board.getBoundingClientRect();
+      offX = ev.clientX - br.left + board.scrollLeft - n.x;
+      offY = ev.clientY - br.top + board.scrollTop - n.y;
+      cancelAnimationFrame(raf); raf = requestAnimationFrame(edgeLoop);
+    });
+    el.addEventListener('pointermove', function(ev){
+      if(!dragging) return;
+      lastX = ev.clientX; lastY = ev.clientY;
+      if(Math.abs(lastX - startX) > 6 || Math.abs(lastY - startY) > 6) moved = true;
+      applyDrag();
     });
     function endDrag(ev){
       if(!dragging) return;
       dragging = false;
+      cancelAnimationFrame(raf);
       el.classList.remove('dragging');
       try{ el.releasePointerCapture(ev.pointerId); }catch(e){}
       save();
+      /* Doble toque (táctil) sobre el hito: abrir o cerrar solo este hito */
+      if(ev.type === 'pointerup' && ev.pointerType === 'touch' && !moved){
+        var now = Date.now();
+        if(lastNoteTap && lastNoteTap.id === n.id && now - lastNoteTap.t < 380){
+          lastNoteTap = null; lastTouchToggle = now; toggleOpen(n);
+        }else{ lastNoteTap = { id:n.id, t:now }; }
+      }
     }
     el.addEventListener('pointerup', endDrag);
     el.addEventListener('pointercancel', endDrag);
+    /* Doble clic (ratón): abrir o cerrar solo este hito */
+    el.addEventListener('dblclick', function(ev){
+      ev.stopPropagation();
+      if(Date.now() - lastTouchToggle < 800) return;
+      if(ev.target === ta || ev.target === del || ev.target === colorDot || ev.target.closest('.drow')) return;
+      toggleOpen(n);
+    });
 
     return el;
   }
 
   function attachNote(n){
-    canvas.appendChild(makeNoteEl(n));
+    var nel = makeNoteEl(n);
+    if(n.open) nel.classList.add('open');
+    canvas.appendChild(nel);
     var mast = document.createElement('div');
     mast.className = 'mast'; mast.id = 'mast-' + n.id;
     canvas.appendChild(mast);
@@ -515,13 +567,12 @@
   }
 
   function addNote(x, y){
-    if(hideText) setHideText(false);
     var id = 'n' + Date.now() + Math.random().toString(16).slice(2);
     var ax = x != null ? x : (300 + Math.random()*400);
     var m = xToDate(ax + 90);
     ax = dateToX(m) - 90;
     var ay = y != null ? y : (roadY(ax + 90) - 220 - Math.random()*40);
-    var n = { id:id, x:ax, y:ay, date:m, hasMonth:false, color:COLORS[0], text:'' };
+    var n = { id:id, x:ax, y:ay, date:m, hasMonth:false, open:!!hideText, color:COLORS[0], text:'' };
     notes.push(n);
     attachNote(n);
     clampY(n);
@@ -594,8 +645,9 @@
     hideText = v;
     canvas.classList.toggle('texts-hidden', hideText);
     notes.forEach(function(n){
+      n.open = false;
       var el = document.getElementById('note-' + n.id);
-      if(el) el.title = hideText ? (n.text || '') : '';
+      if(el){ el.classList.remove('open'); el.title = hideText ? (n.text || '') : ''; }
       clampY(n);
       updateMast(n);
     });
