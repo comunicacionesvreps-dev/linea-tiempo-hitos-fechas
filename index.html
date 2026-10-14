@@ -6,21 +6,12 @@
   /* Plan: papel cálido + tinta oscura (mismo lenguaje de las pizarras), camino terroso, hitos en pasteles.
      Layout: panel lateral de activadores + lienzo con camino ondulado ascendente + tarjeta guía flotante. */
   :root{
-    --paper:#efe9dd; --ink:#2c2620; --ink-soft:#6b6155;
+    --paper:#ebebeb; --surface:#ffffff; --ink:#2c2620; --ink-soft:#6b6155;
     --line:rgba(44,38,32,.14);
-    --road:#8a7256; --road-dash:#efe9dd;
+    --road:#8a7256; --road-dash:#ebebeb;
+    --accent:#d0202e; --accent-dark:#a8141f;
     --veil:rgba(28,24,18,.55);
-    box-sizing:border-box;
-  }
-  @media (prefers-color-scheme: dark){
-    :root:not([data-theme="light"]){
-      --paper:#1c1a17; --ink:#ece6da; --ink-soft:#a89e8e; --line:rgba(236,230,218,.14);
-      --road:#6b5a42; --road-dash:#1c1a17; color-scheme:dark;
-    }
-  }
-  :root[data-theme="dark"]{
-    --paper:#1c1a17; --ink:#ece6da; --ink-soft:#a89e8e; --line:rgba(236,230,218,.14);
-    --road:#6b5a42; --road-dash:#1c1a17; color-scheme:dark;
+    box-sizing:border-box; color-scheme:light;
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;}
@@ -37,11 +28,12 @@
   h1{font-size:15px; font-weight:600; margin:0;}
   .spacer{flex:1;}
   button.pill{
-    font-size:13px; border:1px solid var(--line);
-    background:var(--paper); color:var(--ink); border-radius:999px;
+    font-size:13px; font-weight:600; border:1px solid var(--accent);
+    background:var(--accent); color:#fff; border-radius:999px;
     padding:7px 14px; cursor:pointer;
   }
-  button.pill:hover{ background:var(--line); }
+  button.pill:hover{ background:var(--accent-dark); border-color:var(--accent-dark); }
+  button.pill.armed{ background:var(--ink); border-color:var(--ink); }
 
   /* Encabezado: en escritorio los botones van en línea; en pantallas táctiles se agrupan en un menú ⋯ */
   #menuItems{ display:contents; }
@@ -54,11 +46,12 @@
   .touch #toggleText,.touch #addBtn{ min-height:36px; }
   .touch #menuItems{
     display:none; position:fixed; top:calc(54px + env(safe-area-inset-top, 0px)); right:10px; z-index:70;
-    flex-direction:column; gap:6px; padding:8px; background:var(--paper); border:1px solid var(--line);
+    flex-direction:column; gap:6px; padding:8px; background:var(--surface); border:1px solid var(--line);
     border-radius:14px; box-shadow:0 18px 40px -14px rgba(0,0,0,.45);
   }
   .touch #topbar.menu-open #menuItems{ display:flex; }
   .touch #menuItems .pill{ min-height:40px; text-align:left; order:0; }
+  .touch #menuBtn:hover,.touch #menuBtn:active{ background:var(--accent-dark); }
   .touch .note .ncolor{ width:22px; height:22px; }
   .touch .note button.del,.touch .note button.fold{ min-width:36px; min-height:36px; font-size:18px; }
   .touch .texts-hidden .note.open button.fold{ display:inline-block; border:none; background:transparent; color:rgba(44,38,32,.65); cursor:pointer; padding:2px 4px; }
@@ -178,17 +171,18 @@
   #welcome p{ font-size:15px; line-height:1.55; color:var(--ink-soft); margin:0; max-width:380px; text-wrap:balance; }
 
   .btn{
-    font-size:13.5px; border:1px solid var(--ink); background:var(--ink); color:var(--paper);
+    font-size:13.5px; font-weight:600; border:1px solid var(--accent); background:var(--accent); color:#fff;
     border-radius:999px; padding:9px 20px; cursor:pointer;
   }
-  .btn.ghost{ background:transparent; color:var(--ink); border-color:var(--line); }
-  .btn.ghost:hover{ background:var(--line); }
+  .btn:hover{ background:var(--accent-dark); border-color:var(--accent-dark); }
+  .btn.ghost{ background:transparent; color:var(--accent); border-color:var(--accent); }
+  .btn.ghost:hover{ background:rgba(208,32,46,.08); }
   #welcome .btn{ font-size:15px; padding:11px 26px; }
 
   /* Tarjeta guía */
   #coach{
     position:fixed; z-index:150; width:min(380px, calc(100vw - 24px));
-    background:var(--paper); color:var(--ink); border:1px solid var(--line); border-radius:10px;
+    background:var(--surface); color:var(--ink); border:1px solid var(--line); border-radius:10px;
     padding:16px 18px 14px; box-shadow:0 24px 50px -18px rgba(0,0,0,.5);
   }
   .coach-dots{ display:flex; gap:6px; margin-bottom:10px; }
@@ -850,11 +844,12 @@
   });
 
   var clearArmed = false, clearTimer = null;
-  function disarmClear(){ clearArmed = false; clearBtn.textContent = 'Vaciar'; clearTimeout(clearTimer); }
+  function disarmClear(){ clearArmed = false; clearBtn.classList.remove('armed'); clearBtn.textContent = 'Vaciar'; clearTimeout(clearTimer); }
   clearBtn.addEventListener('click', function(){
     if(!notes.length) return;
     if(!clearArmed){
       clearArmed = true;
+      clearBtn.classList.add('armed');
       clearBtn.textContent = 'Confirmar: vaciar todo';
       clearTimer = setTimeout(disarmClear, 3500);
       return;
