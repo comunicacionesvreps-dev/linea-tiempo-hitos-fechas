@@ -39,7 +39,7 @@
   #menuItems{ display:contents; }
   #menuBtn{ display:none; }
   #helpBtn,#toggleSidebar,#goToday{ order:1; }
-  #toggleText{ order:2; } #addBtn{ order:3; } #clearBtn{ order:4; }
+  #toggleText{ order:2; } #addBtn{ order:3; } #dlBtn{ order:3; } #clearBtn{ order:4; }
   .fold{ display:none; }
   .tbtns{ display:flex; align-items:center; gap:2px; }
   .touch #menuBtn{ display:inline-block; order:1; font-size:18px; line-height:1; padding:6px 14px; min-height:36px; }
@@ -233,6 +233,7 @@
     <button class="pill" id="helpBtn" type="button">Instrucciones</button>
     <button class="pill" id="toggleSidebar" type="button">Activadores</button>
     <button class="pill" id="goToday" type="button">Ir a hoy</button>
+    <button class="pill" id="dlBtn" type="button">Descargar</button>
     <button class="pill" id="clearBtn" type="button">Vaciar</button>
   </div>
   <button class="pill" id="toggleText" type="button">Ocultar textos</button>
@@ -821,6 +822,136 @@
     updateEmpty();
   }
 
+
+  /* ---------- Descarga: línea de tiempo vertical en imagen PNG ---------- */
+  var dlBtn = document.getElementById('dlBtn');
+  function flashBtn(txt){
+    var old = 'Descargar'; dlBtn.textContent = txt;
+    setTimeout(function(){ dlBtn.textContent = old; }, 2600);
+  }
+  function wrapLines(ctx, text, maxW){
+    var out = [];
+    String(text).split(/\n+/).forEach(function(par){
+      var words = par.split(/\s+/).filter(Boolean), line = '';
+      words.forEach(function(w){
+        var t = line ? line + ' ' + w : w;
+        if(ctx.measureText(t).width > maxW && line){ out.push(line); line = w; } else line = t;
+      });
+      if(line) out.push(line);
+    });
+    return out.length ? out : [''];
+  }
+  function rrect(ctx, x, y, w, h, r){
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+  }
+  async function downloadTimeline(){
+    if(!notes.length && !startPoint){ flashBtn('Aún no hay hitos'); return; }
+    try{ await Promise.all([document.fonts.load('700 30px Mulish'), document.fonts.load('400 28px Mulish')]); }catch(e){}
+    var F = 'Mulish, Arial, sans-serif';
+    var C = { paper:'#ebebeb', ink:'#2c2620', soft:'#6b6155', road:'#8a7256', red:'#d0202e' };
+    var W = 1080, P = 64, RX = 120, CX = 210, CW = W - CX - P, S = 2;
+    var list = notes.slice().sort(function(a, b){ return (a.date - b.date) || (a.x - b.x); });
+    var m = document.createElement('canvas').getContext('2d');
+
+    /* Medidas */
+    var blocks = [], y = P + 130;
+    m.font = '700 28px ' + F;
+    var startLines = wrapLines(m, startPoint || 'Punto de partida', CW - 48);
+    var sh = 28 + startLines.length * 38 + 34 + 48;
+    blocks.push({ kind:'start', y:y, h:sh, lines:startLines });
+    y += sh + 34;
+    m.font = '400 28px ' + F;
+    list.forEach(function(n){
+      var txt = (n.text || '').trim();
+      var lines = txt ? wrapLines(m, txt, CW - 48) : ['Hito sin descripción'];
+      var h = 24 + 32 + 8 + lines.length * 38 + 22;
+      blocks.push({ kind:'note', y:y, h:h, lines:lines, n:n, empty:!txt });
+      y += h + 30;
+    });
+    blocks.push({ kind:'hoy', y:y + 6, h:58 });
+    var H = y + 6 + 58 + P;
+
+    var cv = document.createElement('canvas'); cv.width = W * S; cv.height = H * S;
+    var ctx = cv.getContext('2d'); ctx.scale(S, S);
+    ctx.fillStyle = C.paper; ctx.fillRect(0, 0, W, H);
+    ctx.textBaseline = 'alphabetic';
+
+    /* Encabezado */
+    ctx.fillStyle = C.red; ctx.font = '800 22px ' + F;
+    ctx.fillText('LAS HUELLAS DE MI CAMINO PROFESIONAL', P, P + 22);
+    ctx.fillStyle = C.ink; ctx.font = '700 48px ' + F;
+    ctx.fillText('Mi línea de tiempo', P, P + 84);
+
+    /* Camino */
+    var top = blocks[0].y + blocks[0].h / 2, bottom = blocks[blocks.length - 1].y + 29;
+    function roadX(yy){ return RX + 16 * Math.sin((yy - top) / 230); }
+    function path(){
+      ctx.beginPath();
+      for(var yy = top; yy <= bottom; yy += 6){ var xx = roadX(yy); if(yy === top) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy); }
+      ctx.lineTo(roadX(bottom), bottom);
+    }
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowOffsetY = 3; ctx.shadowBlur = 4;
+    path(); ctx.strokeStyle = C.road; ctx.lineWidth = 16; ctx.stroke(); ctx.restore();
+    path(); ctx.strokeStyle = 'rgba(235,235,235,.75)'; ctx.lineWidth = 16; ctx.setLineDash([3, 24]); ctx.stroke(); ctx.setLineDash([]);
+
+    function anchor(cy){
+      var ax = roadX(cy);
+      ctx.strokeStyle = C.soft; ctx.globalAlpha = .6; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(ax, cy); ctx.lineTo(CX, cy); ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.arc(ax, cy, 9, 0, Math.PI * 2); ctx.fillStyle = C.ink; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = C.paper; ctx.stroke();
+    }
+
+    blocks.forEach(function(b){
+      if(b.kind === 'start'){
+        anchor(b.y + b.h / 2);
+        rrect(ctx, CX, b.y, CW, b.h, 6); ctx.fillStyle = C.ink; ctx.fill();
+        ctx.fillStyle = '#c9c1b6'; ctx.font = '800 20px ' + F;
+        ctx.fillText('PUNTO DE PARTIDA', CX + 24, b.y + 38);
+        ctx.fillStyle = C.paper; ctx.font = '700 28px ' + F;
+        b.lines.forEach(function(l, i){ ctx.fillText(l, CX + 24, b.y + 78 + i * 38); });
+        ctx.font = '700 24px ' + F; ctx.fillStyle = '#c9c1b6';
+        ctx.fillText(String(Math.floor(M.startM / 12)), CX + 24, b.y + 78 + b.lines.length * 38 + 4);
+      }else if(b.kind === 'note'){
+        var n = b.n;
+        anchor(b.y + 40);
+        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.22)'; ctx.shadowOffsetY = 6; ctx.shadowBlur = 14;
+        rrect(ctx, CX, b.y, CW, b.h, 4); ctx.fillStyle = n.color || '#f4d36b'; ctx.fill(); ctx.restore();
+        ctx.fillStyle = C.ink; ctx.font = '800 24px ' + F;
+        ctx.fillText(n.hasMonth ? fmt(n.date) : String(Math.floor(n.date / 12)), CX + 24, b.y + 48);
+        ctx.font = (b.empty ? 'italic 400 26px ' : '400 28px ') + F;
+        ctx.fillStyle = b.empty ? 'rgba(44,38,32,.6)' : C.ink;
+        b.lines.forEach(function(l, i){ ctx.fillText(l, CX + 24, b.y + 98 + i * 38); });
+      }else{
+        anchor(b.y + 29);
+        var label = 'Hoy · ' + fmt(TODAY_M);
+        ctx.font = '700 26px ' + F;
+        var tw = ctx.measureText(label).width + 56;
+        ctx.beginPath();
+        ctx.moveTo(CX, b.y); ctx.lineTo(CX + tw, b.y); ctx.lineTo(CX + tw - 18, b.y + 29); ctx.lineTo(CX + tw, b.y + 58); ctx.lineTo(CX, b.y + 58); ctx.closePath();
+        ctx.fillStyle = C.ink; ctx.fill();
+        ctx.fillStyle = C.paper; ctx.fillText(label, CX + 20, b.y + 38);
+      }
+    });
+
+    var blob = await new Promise(function(res){ cv.toBlob(res, 'image/png'); });
+    var filename = 'mi-linea-de-tiempo.png';
+    /* Dentro de claude.ai la descarga pasa por el permiso del visor; en un sitio propio (GitHub Pages) se descarga directo */
+    var dl = (window.claude && window.claude.use) ? await window.claude.use('downloads').catch(function(){ return null; }) : null;
+    if(dl){
+      try{ await dl.save({ filename:filename, data:blob }); }
+      catch(err){ if(err && err.code !== 'declined') flashBtn('No se pudo descargar'); }
+      return;
+    }
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+  dlBtn.addEventListener('click', function(){ downloadTimeline().catch(function(){ flashBtn('No se pudo descargar'); }); });
+
   /* ---------- Controles ---------- */
   document.getElementById('helpBtn').addEventListener('click', function(){ openGuide(0, 'full'); });
   var topbar = document.getElementById('topbar'), menuBtn = document.getElementById('menuBtn');
@@ -829,7 +960,7 @@
   document.addEventListener('pointerdown', function(ev){
     if(topbar.classList.contains('menu-open') && !ev.target.closest('#menuItems') && ev.target !== menuBtn) setMenu(false);
   });
-  ['helpBtn','toggleSidebar','goToday'].forEach(function(id){
+  ['helpBtn','toggleSidebar','goToday','dlBtn'].forEach(function(id){
     document.getElementById(id).addEventListener('click', function(){ setMenu(false); });
   });
   document.getElementById('goToday').addEventListener('click', function(){
